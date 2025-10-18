@@ -49,6 +49,8 @@ class NotificationService {
       macOS: DarwinNotificationDetails(
         presentAlert: true,
         presentSound: true,
+        sound: 'Glass.aiff', // macOS系统默认的响亮声音
+        interruptionLevel: InterruptionLevel.timeSensitive, // 提高通知优先级
       ),
     );
 
@@ -66,7 +68,13 @@ class NotificationService {
   }
 
   Future<void> showFinishNotification() async {
-    await showInstantNotification(title: '番茄结束', body: '恭喜，你完成了一个番茄！休息一下吧');
+    // 连续发送3次通知，间隔1秒，延长声音效果到约3秒
+    for (int i = 0; i < 3; i++) {
+      await showInstantNotification(title: '番茄结束', body: '恭喜，你完成了一个番茄！休息一下吧');
+      if (i < 2) {
+        await Future.delayed(const Duration(seconds: 1));
+      }
+    }
   }
 }
 

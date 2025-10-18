@@ -122,6 +122,33 @@ class _MyHomePageState extends State<MyHomePage> {
                 ),
               ],
             ),
+            const SizedBox(height: 16),
+            // 快捷设置按钮
+            Text(
+              '快捷设置',
+              style: theme.textTheme.titleSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton(
+                  onPressed: service.isRunning ? null : () => service.setPresetDuration(const Duration(minutes: 30)),
+                  child: const Text('30分钟'),
+                ),
+                OutlinedButton(
+                  onPressed: service.isRunning ? null : () => service.setPresetDuration(const Duration(minutes: 35)),
+                  child: const Text('35分钟'),
+                ),
+                OutlinedButton(
+                  onPressed: service.isRunning ? null : () => service.setPresetDuration(const Duration(minutes: 40)),
+                  child: const Text('40分钟'),
+                ),
+              ],
+            ),
             const SizedBox(height: 24),
             Wrap(
               spacing: 12,

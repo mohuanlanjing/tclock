@@ -7,10 +7,12 @@ class PomodoroService extends ChangeNotifier {
   PomodoroService({Duration? initialDuration})
       : _defaultDuration = initialDuration ?? const Duration(minutes: 35) {
     _remaining = _defaultDuration;
+    _lastSetDuration = _defaultDuration;
   }
 
   final Duration _defaultDuration;
   Duration _remaining = Duration.zero;
+  Duration _lastSetDuration = Duration.zero;
   DateTime? _endAtUtc; // for background-safe countdown
   Timer? _ticker;
   bool _isRunning = false;
@@ -26,6 +28,7 @@ class PomodoroService extends ChangeNotifier {
   void increaseByFiveMinutes() {
     if (_isRunning) return;
     _remaining += const Duration(minutes: 5);
+    _lastSetDuration = _remaining;
     developer.log('Duration increased: $_remaining', name: 'PomodoroService');
     notifyListeners();
   }
@@ -34,6 +37,7 @@ class PomodoroService extends ChangeNotifier {
     if (_isRunning) return;
     final Duration next = _remaining - const Duration(minutes: 5);
     _remaining = next.inMinutes < 5 ? const Duration(minutes: 5) : next;
+    _lastSetDuration = _remaining;
     developer.log('Duration decreased: $_remaining', name: 'PomodoroService');
     notifyListeners();
   }
@@ -42,9 +46,9 @@ class PomodoroService extends ChangeNotifier {
     _cancelTicker();
     _isRunning = false;
     _isPaused = false;
-    _remaining = _defaultDuration;
+    _remaining = _lastSetDuration;
     _endAtUtc = null;
-    developer.log('Timer reset', name: 'PomodoroService');
+    developer.log('Timer reset to last set duration: $_lastSetDuration', name: 'PomodoroService');
     notifyListeners();
   }
 
@@ -74,6 +78,14 @@ class PomodoroService extends ChangeNotifier {
     _endAtUtc = DateTime.now().toUtc().add(_remaining);
     developer.log('Timer resumed, ends at $_endAtUtc', name: 'PomodoroService');
     _startTicker();
+    notifyListeners();
+  }
+
+  void setPresetDuration(Duration duration) {
+    if (_isRunning) return;
+    _remaining = duration;
+    _lastSetDuration = duration;
+    developer.log('Preset duration set: $duration', name: 'PomodoroService');
     notifyListeners();
   }
 
