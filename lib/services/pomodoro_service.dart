@@ -67,7 +67,7 @@ class PomodoroService extends ChangeNotifier {
     _isPaused = true;
     _cancelTicker();
     // Freeze remaining
-    _remaining = _computeRemainingFromNow();
+    _remaining = _quantizeToDisplaySeconds(_computeRemainingFromNow());
     developer.log('Timer paused, remaining: $_remaining', name: 'PomodoroService');
     notifyListeners();
   }
@@ -91,22 +91,7 @@ class PomodoroService extends ChangeNotifier {
 
   void _startTicker() {
     _cancelTicker();
-    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-      final Duration left = _computeRemainingFromNow();
-      if (left.isNegative || left.inSeconds <= 0) {
-        _remaining = Duration.zero;
-        _isRunning = false;
-        _isPaused = false;
-        _cancelTicker();
-        developer.log('Timer finished', name: 'PomodoroService');
-        notifyListeners();
-        // Emit finished event for UI to react (dialog, notification)
-        _finishedController.add(null);
-        return;
-      }
-      _remaining = left;
-      notifyListeners();
-    });
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) => _onTick());
   }
 
   Duration _computeRemainingFromNow() {
@@ -114,6 +99,41 @@ class PomodoroService extends ChangeNotifier {
     final DateTime now = DateTime.now().toUtc();
     final Duration left = _endAtUtc!.difference(now);
     return left.isNegative ? Duration.zero : left;
+  }
+
+  void _onTick() {
+    final Duration rawLeft = _computeRemainingFromNow();
+    // Use raw (non-quantized) time for finish detection to avoid lagging by rounding.
+    if (rawLeft.inMilliseconds <= 0) {
+      _onFinish();
+      return;
+    }
+    final Duration displayLeft = _quantizeToDisplaySeconds(rawLeft);
+    _setRemaining(displayLeft);
+  }
+
+  void _onFinish() {
+    _remaining = Duration.zero;
+    _isRunning = false;
+    _isPaused = false;
+    _cancelTicker();
+    developer.log('Timer finished', name: 'PomodoroService');
+    notifyListeners();
+    // Emit finished event for UI to react (dialog, notification)
+    _finishedController.add(null);
+  }
+
+  void _setRemaining(Duration newRemaining) {
+    if (_remaining == newRemaining) return;
+    _remaining = newRemaining;
+    notifyListeners();
+  }
+
+  Duration _quantizeToDisplaySeconds(Duration raw) {
+    if (raw.inMilliseconds <= 0) return Duration.zero;
+    // Round to the nearest second (half-up) for human-friendly display to avoid early drop.
+    final int roundedSeconds = (raw.inMilliseconds + 500) ~/ 1000;
+    return Duration(seconds: roundedSeconds);
   }
 
   void _cancelTicker() {

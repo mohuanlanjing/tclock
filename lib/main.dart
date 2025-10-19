@@ -136,7 +136,7 @@ class _MyHomePageState extends State<MyHomePage> {
               runSpacing: 8,
               children: [
                 OutlinedButton(
-                  onPressed: service.isRunning ? null : () => service.setPresetDuration(const Duration(minutes: 1)),
+                  onPressed: service.isRunning ? null : () => service.setPresetDuration(const Duration(minutes: 30)),
                   child: const Text('30分钟'),
                 ),
                 OutlinedButton(
