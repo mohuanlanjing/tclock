@@ -52,6 +52,7 @@ app.*.map.json
 # Android specifics
 /android/local.properties
 /android/.gradle/
+android/.kotlin/
 **/*.keystore
 **/*.jks
 android/key.properties
