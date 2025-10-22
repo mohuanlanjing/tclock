@@ -24,6 +24,7 @@ class PomodoroService extends ChangeNotifier {
   Duration get remaining => _remaining;
   bool get isRunning => _isRunning;
   bool get isPaused => _isPaused;
+  Duration get lastSetDuration => _lastSetDuration;
 
   void increaseByFiveMinutes() {
     if (_isRunning) return;

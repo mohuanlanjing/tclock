@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:provider/provider.dart';
 import 'services/notification_service.dart';
 import 'services/pomodoro_service.dart';
+import 'services/records_service.dart';
+import 'pages/manage_topics_page.dart';
+import 'pages/records_page.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,6 +21,7 @@ class MyApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => PomodoroService()),
+        ChangeNotifierProvider(create: (_) => RecordsService()..init()),
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
@@ -41,6 +45,8 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   StreamSubscription<void>? _sub;
+  final TextEditingController _topicController = TextEditingController(text: '日常');
+  final TextEditingController _subTaskController = TextEditingController();
 
   String _formatDuration(Duration d) {
     final String mm = d.inMinutes.remainder(60).toString().padLeft(2, '0');
@@ -58,6 +64,8 @@ class _MyHomePageState extends State<MyHomePage> {
     final service = context.read<PomodoroService>();
     _sub = service.onFinished.listen((_) async {
       if (!mounted) return;
+      // 写入结束时间
+      await context.read<RecordsService>().finishOngoing();
       // Foreground dialog
       showDialog(
         context: context,
@@ -80,6 +88,8 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void dispose() {
     _sub?.cancel();
+    _topicController.dispose();
+    _subTaskController.dispose();
     super.dispose();
   }
 
@@ -87,17 +97,96 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final service = context.watch<PomodoroService>();
+    final recordsService = context.watch<RecordsService>();
+
+    // 默认主题：优先最近一次使用
+    if ((_topicController.text.isEmpty || _topicController.text == '日常') &&
+        (recordsService.lastTopicName != null && recordsService.lastTopicName!.isNotEmpty)) {
+      _topicController.text = recordsService.lastTopicName!;
+    }
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('TClock 番茄'),
         centerTitle: true,
+        actions: [
+          IconButton(
+            tooltip: '管理主题',
+            icon: const Icon(Icons.list_alt),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ManageTopicsPage()),
+            ),
+          ),
+          IconButton(
+            tooltip: '查看记录',
+            icon: const Icon(Icons.table_chart_outlined),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const RecordsPage()),
+            ),
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            // 主题与子任务输入
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '本次要做什么？',
+                style: theme.textTheme.titleMedium,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    value: recordsService.topics.any((t) => t.name == _topicController.text)
+                        ? _topicController.text
+                        : null,
+                    items: [
+                      ...recordsService.topics.map((t) => DropdownMenuItem(
+                            value: t.name,
+                            child: Text(t.name),
+                          )),
+                    ],
+                    onChanged: (v) {
+                      if (v == null) return;
+                      _topicController.text = v;
+                    },
+                    decoration: const InputDecoration(labelText: '选择主题'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 2,
+                  child: TextFormField(
+                    controller: _topicController,
+                    decoration: const InputDecoration(
+                      labelText: '或输入新主题',
+                      hintText: '例如：学习/开发',
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 3,
+                  child: TextField(
+                    controller: _subTaskController,
+                    decoration: const InputDecoration(
+                      labelText: '子任务（可留空）',
+                      hintText: '例如：实现登录接口',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
             Text(
               _formatDuration(service.remaining),
               style: theme.textTheme.displayMedium?.copyWith(
@@ -154,7 +243,19 @@ class _MyHomePageState extends State<MyHomePage> {
               spacing: 12,
               children: [
                 ElevatedButton.icon(
-                  onPressed: service.isRunning ? null : service.start,
+                  onPressed: service.isRunning
+                      ? null
+                      : () async {
+                          final records = context.read<RecordsService>();
+                          final String topic = _topicController.text.trim().isEmpty ? '日常' : _topicController.text.trim();
+                          final String? subTask = _subTaskController.text.trim().isEmpty ? null : _subTaskController.text.trim();
+                          await records.startSession(
+                            topicName: topic,
+                            subTask: subTask,
+                            durationMinutes: service.lastSetDuration.inMinutes,
+                          );
+                          service.start();
+                        },
                   icon: const Icon(Icons.play_arrow),
                   label: const Text('开始'),
                 ),
@@ -169,7 +270,11 @@ class _MyHomePageState extends State<MyHomePage> {
                   label: const Text('继续'),
                 ),
                 OutlinedButton.icon(
-                  onPressed: service.reset,
+                  onPressed: () async {
+                    // 取消未完成记录
+                    await context.read<RecordsService>().cancelOngoing();
+                    service.reset();
+                  },
                   icon: const Icon(Icons.stop_circle_outlined),
                   label: const Text('重置'),
                 ),
