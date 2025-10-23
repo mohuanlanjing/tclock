@@ -45,8 +45,13 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   StreamSubscription<void>? _sub;
-  final TextEditingController _topicController = TextEditingController(text: '日常');
+  final TextEditingController _newTopicController = TextEditingController();
   final TextEditingController _subTaskController = TextEditingController();
+
+  // 主题选择模式：false=选择已有主题，true=使用新主题
+  bool _useNewTopic = false;
+  String? _selectedTopicName; // 选择已有主题时的值
+  bool _initTopicApplied = false; // 仅在首次进入时应用最近主题
 
   String _formatDuration(Duration d) {
     final String mm = d.inMinutes.remainder(60).toString().padLeft(2, '0');
@@ -83,14 +88,131 @@ class _MyHomePageState extends State<MyHomePage> {
       // System notification (sound)
       await NotificationService.instance.showFinishNotification();
     });
+
+    // 首次进入时，根据最近主题进行一次默认设置，不在 build 中覆盖用户输入
+    final recordsService = context.read<RecordsService>();
+    _applyDefaultTopic(recordsService);
   }
 
   @override
   void dispose() {
     _sub?.cancel();
-    _topicController.dispose();
+    _newTopicController.dispose();
     _subTaskController.dispose();
     super.dispose();
+  }
+
+  void _applyDefaultTopic(RecordsService recordsService) {
+    if (_initTopicApplied) return;
+    _initTopicApplied = true;
+    final String? last = recordsService.lastTopicName;
+    if (last == null || last.isEmpty) {
+      // 保持默认：选择已有主题模式且不选中任何，提示用户选择
+      _useNewTopic = false;
+      _selectedTopicName = null;
+      return;
+    }
+    final bool exists = recordsService.topics.any((t) => t.name == last);
+    if (exists) {
+      _useNewTopic = false;
+      _selectedTopicName = last;
+    } else {
+      _useNewTopic = true;
+      _newTopicController.text = last;
+    }
+  }
+
+  Future<void> _handleStartPressed(PomodoroService service, BuildContext context) async {
+    final records = context.read<RecordsService>();
+    final String topic = _useNewTopic
+        ? _newTopicController.text.trim()
+        : (_selectedTopicName ?? '').trim();
+    final String? subTask = _subTaskController.text.trim().isEmpty ? null : _subTaskController.text.trim();
+
+    if (topic.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先选择主题或输入新主题')),
+      );
+      return;
+    }
+
+    await records.startSession(
+      topicName: topic,
+      subTask: subTask,
+      durationMinutes: service.lastSetDuration.inMinutes,
+    );
+    service.start();
+  }
+
+  Widget _buildTopicSection(ThemeData theme, RecordsService recordsService) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            '本次要做什么？',
+            style: theme.textTheme.titleMedium,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            ChoiceChip(
+              selected: !_useNewTopic,
+              label: const Text('选择已有'),
+              onSelected: (v) {
+                setState(() => _useNewTopic = !v ? _useNewTopic : false);
+              },
+            ),
+            const SizedBox(width: 8),
+            ChoiceChip(
+              selected: _useNewTopic,
+              label: const Text('使用新主题'),
+              onSelected: (v) {
+                setState(() => _useNewTopic = v);
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (!_useNewTopic)
+          DropdownButtonFormField<String>(
+            isExpanded: true,
+            value: _selectedTopicName != null &&
+                    recordsService.topics.any((t) => t.name == _selectedTopicName)
+                ? _selectedTopicName
+                : null,
+            items: [
+              ...recordsService.topics.map((t) => DropdownMenuItem(
+                    value: t.name,
+                    child: Text(t.name),
+                  )),
+            ],
+            onChanged: (v) {
+              if (v == null) return;
+              setState(() => _selectedTopicName = v);
+            },
+            decoration: const InputDecoration(labelText: '选择主题'),
+          )
+        else
+          TextFormField(
+            controller: _newTopicController,
+            decoration: const InputDecoration(
+              labelText: '输入新主题',
+              hintText: '例如：学习/开发',
+            ),
+          ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _subTaskController,
+          decoration: const InputDecoration(
+            labelText: '子任务（可留空）',
+            hintText: '例如：实现登录接口',
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -98,12 +220,6 @@ class _MyHomePageState extends State<MyHomePage> {
     final theme = Theme.of(context);
     final service = context.watch<PomodoroService>();
     final recordsService = context.watch<RecordsService>();
-
-    // 默认主题：优先最近一次使用
-    if ((_topicController.text.isEmpty || _topicController.text == '日常') &&
-        (recordsService.lastTopicName != null && recordsService.lastTopicName!.isNotEmpty)) {
-      _topicController.text = recordsService.lastTopicName!;
-    }
 
     return Scaffold(
       appBar: AppBar(
@@ -131,61 +247,7 @@ class _MyHomePageState extends State<MyHomePage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // 主题与子任务输入
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                '本次要做什么？',
-                style: theme.textTheme.titleMedium,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: DropdownButtonFormField<String>(
-                    isExpanded: true,
-                    value: recordsService.topics.any((t) => t.name == _topicController.text)
-                        ? _topicController.text
-                        : null,
-                    items: [
-                      ...recordsService.topics.map((t) => DropdownMenuItem(
-                            value: t.name,
-                            child: Text(t.name),
-                          )),
-                    ],
-                    onChanged: (v) {
-                      if (v == null) return;
-                      _topicController.text = v;
-                    },
-                    decoration: const InputDecoration(labelText: '选择主题'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 2,
-                  child: TextFormField(
-                    controller: _topicController,
-                    decoration: const InputDecoration(
-                      labelText: '或输入新主题',
-                      hintText: '例如：学习/开发',
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  flex: 3,
-                  child: TextField(
-                    controller: _subTaskController,
-                    decoration: const InputDecoration(
-                      labelText: '子任务（可留空）',
-                      hintText: '例如：实现登录接口',
-                    ),
-                  ),
-                ),
-              ],
-            ),
+            _buildTopicSection(theme, recordsService),
             const SizedBox(height: 16),
             Text(
               _formatDuration(service.remaining),
@@ -243,19 +305,7 @@ class _MyHomePageState extends State<MyHomePage> {
               spacing: 12,
               children: [
                 ElevatedButton.icon(
-                  onPressed: service.isRunning
-                      ? null
-                      : () async {
-                          final records = context.read<RecordsService>();
-                          final String topic = _topicController.text.trim().isEmpty ? '日常' : _topicController.text.trim();
-                          final String? subTask = _subTaskController.text.trim().isEmpty ? null : _subTaskController.text.trim();
-                          await records.startSession(
-                            topicName: topic,
-                            subTask: subTask,
-                            durationMinutes: service.lastSetDuration.inMinutes,
-                          );
-                          service.start();
-                        },
+                  onPressed: service.isRunning ? null : () => _handleStartPressed(service, context),
                   icon: const Icon(Icons.play_arrow),
                   label: const Text('开始'),
                 ),
