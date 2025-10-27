@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../services/records_service.dart';
 import '../models/tomato_models.dart';
+import '../services/pomodoro_service.dart';
 
 class RecordsPage extends StatefulWidget {
   const RecordsPage({super.key});
@@ -37,7 +38,7 @@ class _RecordsPageState extends State<RecordsPage> {
     final int finishedCount = filtered.where((r) => r.isFinished).length;
     final int totalMinutes = filtered
         .where((r) => r.isFinished)
-        .fold(0, (acc, r) => acc + r.durationMinutes);
+        .fold(0, (acc, r) => acc + actualMinutesOf(r));
 
     return Scaffold(
       appBar: AppBar(
@@ -89,7 +90,7 @@ class _RecordsPageState extends State<RecordsPage> {
                         final finishedInSection = section.records.where((r) => r.isFinished).length;
                         final minutesInSection = section.records
                             .where((r) => r.isFinished)
-                            .fold(0, (acc, r) => acc + r.durationMinutes);
+                            .fold(0, (acc, r) => acc + actualMinutesOf(r));
                         return Card(
                           margin: const EdgeInsets.only(bottom: 12),
                           child: ExpansionTile(
@@ -142,6 +143,8 @@ class _RecordsPageState extends State<RecordsPage> {
     return sections;
   }
 
+  
+
   String _formatDate(DateTime date) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -181,9 +184,57 @@ class _DateSection {
   final List<TomatoRecord> records;
 }
 
+/// 计算一条已完成记录的实际分钟数（向上取整）。
+int actualMinutesOf(TomatoRecord r) {
+  if (!r.isFinished) return 0;
+  final Duration d = r.endAt!.difference(r.startAt);
+  final int secs = d.inSeconds;
+  if (secs <= 0) return 0;
+  return (secs + 59) ~/ 60;
+}
+
 class _RecordTile extends StatelessWidget {
   const _RecordTile({required this.record});
   final TomatoRecord record;
+
+  int _remainSecondsOf(TomatoRecord r) {
+    return r.remainingSeconds > 0 ? r.remainingSeconds : (r.durationMinutes * 60);
+  }
+
+  Future<void> _confirmAndResume(BuildContext context, TomatoRecord r) async {
+    final int remain = _remainSecondsOf(r);
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('继续未完成番茄？'),
+        content: Text('剩余 ${(remain / 60).ceil()} 分钟，是否继续？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('继续')),
+        ],
+      ),
+    );
+    if (ok == true) {
+      final pomo = context.read<PomodoroService>();
+      if (pomo.isRunning) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已有计时进行中，请先处理当前计时')),
+        );
+        return;
+      }
+      final records = context.read<RecordsService>();
+      await records.resumeRecordById(r.id);
+      if (!context.mounted) return;
+      pomo.setPresetDuration(Duration(seconds: remain));
+      pomo.start();
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已继续未完成任务')),
+      );
+      // 返回番茄时钟页，便于用户立即看到倒计时
+      Navigator.of(context).maybePop();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -191,20 +242,79 @@ class _RecordTile extends StatelessWidget {
     final end = _formatTime(record.endAt);
     final title = record.subTask?.isNotEmpty == true ? record.subTask! : record.topicNameSnapshot;
     final subtitle = record.subTask?.isNotEmpty == true ? record.topicNameSnapshot : null;
+    final bool isFinished = record.isFinished;
     return ListTile(
       dense: true,
-      leading: Icon(record.isFinished ? Icons.check_circle : Icons.timelapse, color: record.isFinished ? Colors.green : Colors.orange),
+      leading: Icon(isFinished ? Icons.check_circle : Icons.timelapse, color: isFinished ? Colors.green : Colors.orange),
       title: Text(title),
       subtitle: subtitle == null ? null : Text(subtitle),
-      trailing: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text('$start - $end', style: const TextStyle(fontFeatures: [])),
-          const SizedBox(height: 2),
-          Text('${record.durationMinutes} 分钟'),
-        ],
-      ),
+      trailing: isFinished
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text('$start - $end', style: const TextStyle(fontFeatures: [])),
+                    const SizedBox(height: 2),
+                    Text('${actualMinutesOf(record)} 分钟'),
+                  ],
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: '删除此记录',
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () async {
+                    final bool? ok = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('删除记录？'),
+                        content: const Text('该操作不可撤销，确定删除？'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+                          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('删除')),
+                        ],
+                      ),
+                    );
+                    if (ok == true) {
+                      await context.read<RecordsService>().deleteRecordById(record.id);
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('已删除记录')),
+                      );
+                    }
+                  },
+                )
+              ],
+            )
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text('$start - -', style: const TextStyle(fontFeatures: [])),
+                    const SizedBox(height: 2),
+                    Text('剩余 ${(_remainSecondsOf(record) / 60).ceil()} 分钟'),
+                  ],
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: '继续',
+                  icon: const Icon(Icons.play_circle_outline),
+                  onPressed: () async {
+                    await _confirmAndResume(context, record);
+                  },
+                )
+              ],
+            ),
+      onTap: isFinished
+          ? null
+          : () async {
+              await _confirmAndResume(context, record);
+            },
     );
   }
 

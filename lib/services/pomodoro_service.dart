@@ -142,6 +142,17 @@ class PomodoroService extends ChangeNotifier {
     _ticker = null;
   }
 
+  /// 提前完成后将界面清零，但不修改 lastSetDuration，避免下次默认变成 0。
+  void finishEarlyAndClear() {
+    _cancelTicker();
+    _isRunning = false;
+    _isPaused = false;
+    _endAtUtc = null;
+    _setRemaining(Duration.zero);
+    developer.log('Timer cleared to zero after early finish', name: 'PomodoroService');
+    notifyListeners();
+  }
+
   @override
   void dispose() {
     _cancelTicker();

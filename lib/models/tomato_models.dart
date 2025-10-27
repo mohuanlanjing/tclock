@@ -34,6 +34,7 @@ class TomatoRecord {
     required this.startAt,
     this.endAt,
     required this.durationMinutes,
+    required this.remainingSeconds,
   });
 
   final String id;
@@ -43,6 +44,7 @@ class TomatoRecord {
   final DateTime startAt; // 精确到秒
   final DateTime? endAt; // 完成后写入
   final int durationMinutes; // 本番茄设置的总时长（如 35/40）
+  final int remainingSeconds; // 剩余秒数：默认=duration*60；暂停写入；完成=0
 
   bool get isFinished => endAt != null;
 
@@ -54,6 +56,7 @@ class TomatoRecord {
     DateTime? startAt,
     DateTime? endAt,
     int? durationMinutes,
+    int? remainingSeconds,
   }) => TomatoRecord(
         id: id ?? this.id,
         topicId: topicId ?? this.topicId,
@@ -62,6 +65,7 @@ class TomatoRecord {
         startAt: startAt ?? this.startAt,
         endAt: endAt ?? this.endAt,
         durationMinutes: durationMinutes ?? this.durationMinutes,
+        remainingSeconds: remainingSeconds ?? this.remainingSeconds,
       );
 
   Map<String, dynamic> toJson() => {
@@ -72,6 +76,7 @@ class TomatoRecord {
         'startAt': startAt.toIso8601String(),
         'endAt': endAt?.toIso8601String(),
         'durationMinutes': durationMinutes,
+        'remainingSeconds': remainingSeconds,
       };
 
   static TomatoRecord fromJson(Map<String, dynamic> json) => TomatoRecord(
@@ -82,6 +87,12 @@ class TomatoRecord {
         startAt: DateTime.parse(json['startAt'] as String),
         endAt: json['endAt'] == null ? null : DateTime.parse(json['endAt'] as String),
         durationMinutes: (json['durationMinutes'] as num).toInt(),
+        // 兼容老数据：未完成默认=duration*60；已完成=0
+        remainingSeconds: json.containsKey('remainingSeconds')
+            ? (json['remainingSeconds'] as num).toInt()
+            : ((json['endAt'] == null)
+                ? ((json['durationMinutes'] as num).toInt() * 60)
+                : 0),
       );
 }
 

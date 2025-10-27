@@ -136,6 +136,14 @@ class _MyHomePageState extends State<MyHomePage> {
       return;
     }
 
+    // 若存在未完成记录，先提示用户去记录页处理，避免产生多条同时进行的记录
+    if (records.ongoing != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已有未完成记录，请在记录页处理后再开始新的番茄')),
+      );
+      return;
+    }
+
     await records.startSession(
       topicName: topic,
       subTask: subTask,
@@ -310,7 +318,14 @@ class _MyHomePageState extends State<MyHomePage> {
                   label: const Text('开始'),
                 ),
                 ElevatedButton.icon(
-                  onPressed: service.isRunning && !service.isPaused ? service.pause : null,
+                  onPressed: service.isRunning && !service.isPaused
+                      ? () async {
+                          service.pause();
+                          await context
+                              .read<RecordsService>()
+                              .updateOngoingRemainingSeconds(service.remaining.inSeconds);
+                        }
+                      : null,
                   icon: const Icon(Icons.pause),
                   label: const Text('暂停'),
                 ),
@@ -319,14 +334,38 @@ class _MyHomePageState extends State<MyHomePage> {
                   icon: const Icon(Icons.play_circle),
                   label: const Text('继续'),
                 ),
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    // 取消未完成记录
-                    await context.read<RecordsService>().cancelOngoing();
-                    service.reset();
-                  },
-                  icon: const Icon(Icons.stop_circle_outlined),
-                  label: const Text('重置'),
+                Tooltip(
+                  message: '清零界面倒计时，不影响未完成记录',
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      service.finishEarlyAndClear();
+                    },
+                    icon: const Icon(Icons.stop_circle_outlined),
+                    label: const Text('重置'),
+                  ),
+                ),
+                FilledButton.icon(
+                  onPressed: (service.isRunning || service.isPaused)
+                      ? () async {
+                          final bool? ok = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: const Text('提前完成?'),
+                              content: const Text('将写入当前时间为完成时间，并清零倒计时。'),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+                                FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('确定')),
+                              ],
+                            ),
+                          );
+                          if (ok == true) {
+                            await context.read<RecordsService>().finishOngoing();
+                            service.finishEarlyAndClear();
+                          }
+                        }
+                      : null,
+                  icon: const Icon(Icons.flag_circle_outlined),
+                  label: const Text('提前完成'),
                 ),
               ],
             ),

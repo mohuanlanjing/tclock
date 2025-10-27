@@ -8,7 +8,7 @@ import 'storage_service.dart';
 /// 负责番茄记录的业务逻辑：
 /// - 按主题与子任务创建记录
 /// - 完成时写入结束时间
-/// - 重置时取消未完成记录
+/// - 重置时仅重置剩余时间与开始时间，不删除记录
 class RecordsService extends ChangeNotifier {
   RecordsService();
 
@@ -54,6 +54,7 @@ class RecordsService extends ChangeNotifier {
       startAt: DateTime.now(),
       endAt: null,
       durationMinutes: durationMinutes,
+      remainingSeconds: durationMinutes * 60,
     );
     await _storage.addRecord(record);
     await _storage.setLastTopicName(topic.name);
@@ -65,7 +66,7 @@ class RecordsService extends ChangeNotifier {
   /// 结束当前进行中的记录。
   Future<void> finishOngoing() async {
     if (_ongoing == null) return;
-    final TomatoRecord updated = _ongoing!.copyWith(endAt: DateTime.now());
+    final TomatoRecord updated = _ongoing!.copyWith(endAt: DateTime.now(), remainingSeconds: 0);
     await _storage.upsertRecord(updated);
     _ongoing = null;
     notifyListeners();
@@ -84,6 +85,68 @@ class RecordsService extends ChangeNotifier {
     _ongoing = null;
     notifyListeners();
     developer.log('Session canceled', name: 'RecordsService');
+  }
+
+  /// 重置当前进行中记录：更新开始时间为当前，
+  /// 同步更新计划时长与剩余秒数为新的时长。
+  Future<void> resetOngoingTo(Duration newDuration) async {
+    if (_ongoing == null) return;
+    final TomatoRecord updated = _ongoing!.copyWith(
+      startAt: DateTime.now(),
+      endAt: null,
+      durationMinutes: newDuration.inMinutes,
+      remainingSeconds: newDuration.inSeconds,
+    );
+    await _storage.upsertRecord(updated);
+    _ongoing = updated;
+    notifyListeners();
+    developer.log('Ongoing reset to ${newDuration.inMinutes}m', name: 'RecordsService');
+  }
+
+  /// 删除一条记录（仅供记录页管理使用）。
+  Future<void> deleteRecordById(String recordId) async {
+    await _storage.deleteRecordById(recordId);
+    if (_ongoing?.id == recordId) {
+      _ongoing = null;
+    }
+    notifyListeners();
+    developer.log('Record deleted: $recordId', name: 'RecordsService');
+  }
+
+  /// 暂停时更新当前进行中记录的剩余秒数。
+  Future<void> updateOngoingRemainingSeconds(int seconds) async {
+    if (_ongoing == null) return;
+    final int clamped = seconds < 0 ? 0 : seconds;
+    final TomatoRecord updated = _ongoing!.copyWith(remainingSeconds: clamped);
+    await _storage.upsertRecord(updated);
+    _ongoing = updated;
+    notifyListeners();
+    developer.log('Remaining seconds updated: $clamped', name: 'RecordsService');
+  }
+
+  /// 从记录列表继续一个未完成的任务。
+  /// 若当前已有进行中记录，则直接返回不操作。
+  Future<void> resumeRecordById(String recordId) async {
+    if (_ongoing != null) return;
+    await _storage.ensureLoaded();
+    final TomatoRecord? rec = _storage.records.firstWhere(
+      (r) => r.id == recordId,
+      orElse: () => TomatoRecord(
+        id: '',
+        topicId: '',
+        topicNameSnapshot: '',
+        subTask: null,
+        startAt: DateTime.now(),
+        endAt: DateTime.now(),
+        durationMinutes: 0,
+        remainingSeconds: 0,
+      ),
+    );
+    if (rec == null || rec.id.isEmpty || rec.endAt != null) return;
+    _ongoing = rec;
+    await _storage.setLastTopicName(rec.topicNameSnapshot);
+    notifyListeners();
+    developer.log('Resumed record: ${rec.id}', name: 'RecordsService');
   }
 
   String _genId() {
