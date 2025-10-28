@@ -36,9 +36,10 @@ class _RecordsPageState extends State<RecordsPage> {
     ];
 
     final int finishedCount = filtered.where((r) => r.isFinished).length;
-    final int totalMinutes = filtered
+    final int totalSeconds = filtered
         .where((r) => r.isFinished)
-        .fold(0, (acc, r) => acc + actualMinutesOf(r));
+        .fold(0, (acc, r) => acc + context.read<RecordsService>().computeActualSeconds(r));
+    final int totalMinutes = totalSeconds ~/ 60; // 向下取整，避免提前完成看起来像整时长
 
     return Scaffold(
       appBar: AppBar(
@@ -88,9 +89,10 @@ class _RecordsPageState extends State<RecordsPage> {
                         final section = sections[index];
                         final dateTitle = _formatDate(section.dateOnly);
                         final finishedInSection = section.records.where((r) => r.isFinished).length;
-                        final minutesInSection = section.records
+                        final int secondsInSection = section.records
                             .where((r) => r.isFinished)
-                            .fold(0, (acc, r) => acc + actualMinutesOf(r));
+                            .fold(0, (acc, r) => acc + context.read<RecordsService>().computeActualSeconds(r));
+                        final int minutesInSection = secondsInSection ~/ 60; // 向下取整
                         return Card(
                           margin: const EdgeInsets.only(bottom: 12),
                           child: ExpansionTile(
@@ -258,7 +260,20 @@ class _RecordTile extends StatelessWidget {
                   children: [
                     Text('$start - $end', style: const TextStyle(fontFeatures: [])),
                     const SizedBox(height: 2),
-                    Text('${actualMinutesOf(record)} 分钟'),
+                    Builder(
+                      builder: (ctx) {
+                        final records = ctx.read<RecordsService>();
+                        final int actualSecs = records.computeActualSeconds(record);
+                        final String actualFmt = _formatDurationFromSeconds(actualSecs);
+                        final String plannedFmt = _formatDurationFromSeconds(record.durationMinutes * 60);
+                        final Widget label = Text('实际 $actualFmt · 设定 $plannedFmt');
+                        return Tooltip(
+                          message: '实际时长规则：\n1) 不超过设定时长\n2) 提前完成 = 设定时长 - 当时剩余\n3) 展示精确到秒',
+                          preferBelow: true,
+                          child: label,
+                        );
+                      },
+                    ),
                   ],
                 ),
                 const SizedBox(width: 8),
@@ -324,6 +339,20 @@ class _RecordTile extends StatelessWidget {
     final m = dt.minute.toString().padLeft(2, '0');
     final s = dt.second.toString().padLeft(2, '0');
     return '$h:$m:$s';
+  }
+
+  String _formatDurationFromSeconds(int secs) {
+    if (secs <= 0) return '00:00';
+    final int hours = secs ~/ 3600;
+    final int minutes = (secs % 3600) ~/ 60;
+    final int seconds = secs % 60;
+    final mm = minutes.toString().padLeft(2, '0');
+    final ss = seconds.toString().padLeft(2, '0');
+    if (hours > 0) {
+      final hh = hours.toString().padLeft(2, '0');
+      return '$hh:$mm:$ss';
+    }
+    return '$mm:$ss';
   }
 }
 

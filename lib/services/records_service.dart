@@ -64,13 +64,22 @@ class RecordsService extends ChangeNotifier {
   }
 
   /// 结束当前进行中的记录。
-  Future<void> finishOngoing() async {
+  Future<void> finishOngoing({int? remainingSecondsAtFinish}) async {
     if (_ongoing == null) return;
-    final TomatoRecord updated = _ongoing!.copyWith(endAt: DateTime.now(), remainingSeconds: 0);
+    final TomatoRecord current = _ongoing!;
+    final int totalSeconds = current.durationMinutes * 60;
+    final int rawRemain = remainingSecondsAtFinish ?? 0;
+    final int clampedRemain = rawRemain < 0
+        ? 0
+        : (rawRemain > totalSeconds ? totalSeconds : rawRemain);
+    final TomatoRecord updated = current.copyWith(
+      endAt: DateTime.now(),
+      remainingSeconds: clampedRemain,
+    );
     await _storage.upsertRecord(updated);
     _ongoing = null;
     notifyListeners();
-    developer.log('Session finished', name: 'RecordsService');
+    developer.log('Session finished, remainSecs=$clampedRemain', name: 'RecordsService');
   }
 
   String? get lastTopicName => _storage.lastTopicName;
@@ -152,6 +161,23 @@ class RecordsService extends ChangeNotifier {
   String _genId() {
     final int ts = DateTime.now().microsecondsSinceEpoch;
     return 'rec_$ts';
+  }
+
+  /// 实际用时（秒）。规则：已完成时为 totalSeconds - remainingSeconds；夹在 [0, totalSeconds]。
+  int computeActualSeconds(TomatoRecord record) {
+    if (!record.isFinished) return 0;
+    final int totalSeconds = record.durationMinutes * 60;
+    int remain = record.remainingSeconds;
+    if (remain < 0) remain = 0;
+    if (remain > totalSeconds) remain = totalSeconds;
+    return totalSeconds - remain;
+  }
+
+  /// 实际用时（分钟，向上取整）。
+  int computeActualMinutesCeil(TomatoRecord record) {
+    final int secs = computeActualSeconds(record);
+    if (secs <= 0) return 0;
+    return (secs + 59) ~/ 60;
   }
 }
 

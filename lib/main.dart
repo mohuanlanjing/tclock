@@ -359,7 +359,10 @@ class _MyHomePageState extends State<MyHomePage> {
                             ),
                           );
                           if (ok == true) {
-                            await context.read<RecordsService>().finishOngoing();
+                            final int remainSecs = service.remaining.inSeconds;
+                            await context.read<RecordsService>().finishOngoing(
+                                  remainingSecondsAtFinish: remainSecs,
+                                );
                             service.finishEarlyAndClear();
                           }
                         }
